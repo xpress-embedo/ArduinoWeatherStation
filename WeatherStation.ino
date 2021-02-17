@@ -2,6 +2,7 @@
 
 /*----------------------------------VARIABLES---------------------------------*/
 extern uint8_t SmallFont[];
+extern uint8_t TinyFont[];
 const int led = 13u;
 OLED  myOLED(SDA, SCL);
 
@@ -12,8 +13,12 @@ String pswd = "12345678";
 /*---Buffer and Index to process response from ESP8266 Module---*/
 uint8_t buff_idx = 0;
 uint8_t buff[200] = { 0 };
+
 uint8_t IP_ADDRESS[17u] = { 0 };    /*--Store IP Address--*/
 uint8_t MAC_ADDRESS[18u] = { 0 };   /*--Store MAC Address--*/
+
+#define OLED_SMALL_LEN    22u
+char oled_buff_s[OLED_SMALL_LEN] = { 0 };     /*--OLED Data to write on a line with Small Font--*/
 
 /*------------------------------FUNCTION PROTOTYPES---------------------------*/
 uint8_t send_echo_off( void );
@@ -32,8 +37,10 @@ void flush_buffer( void );
 
 void setup() 
 {
+  /*--Initialize the Serial Module, ESP8266 is connected with this--*/
+  /*--Make sure to change the baud rate of ESP8266 module to 9600 using AT+UART_DEF command--*/
   Serial.begin( 9600 );
-  pinMode( led, OUTPUT );
+  /*--Initialize OLED--*/
   if(!myOLED.begin(SSD1306_128X64))
   {
     while(1);
@@ -41,62 +48,63 @@ void setup()
   
   myOLED.setFont(SmallFont);
   myOLED.clrScr();
-  myOLED.print("Embedded Laboratory", CENTER, 0u);
-  myOLED.print("Open Weather Map", CENTER, 16u);
-  myOLED.print("Weather Station", CENTER, 32u);
-  myOLED.update();
-  delay(2000);
-  // Send ECHO Off Command
-  send_echo_off();
-  // Check If Module is Okay
-  while ( !send_at(2000) )
-  {
-    myOLED.print("Connecting....       ", LEFT, 56u);
-    myOLED.update();
-    delay(1000);
-  }
-  myOLED.print("ESP8266 Connection OK", LEFT, 56u);
-  myOLED.update();
-
-  delay(2000);
-  // Set Module in Station Mode
-  while( !send_mode(1,2000) )
-  {
-    myOLED.print("Unable to Set Mode   ", LEFT, 56u);
-    myOLED.update();
-    delay(1000);
-  }
-  myOLED.print("MODE SET OK          ", LEFT, 56u);
-  myOLED.update();
-
-  delay(2000);
-  // Joining Access Point
-  while( !send_join_ap(ssid, pswd, 5000) )
-  {
-    myOLED.print("Unable to Connect    ", LEFT, 56u);
-    myOLED.update();
-    delay(1000);
-  }
-  myOLED.print("Connected with AP    ", LEFT, 56u);
+  myOLED.print("EMBEDDED LABORATORY", CENTER, 0u);
+  myOLED.print("OPEN WEATHER API", CENTER, 16u);
+  myOLED.print("Weather Station", CENTER, 24u);
   myOLED.update();
   
-  // get the assigned IP Address and MAC Address
-  while( !get_ip_mac_address( IP_ADDRESS, MAC_ADDRESS, 2000) )
+  /*--Send ECHO Off Command--*/
+  send_echo_off();
+  myOLED.print("...                  ", LEFT, 56u);
+  myOLED.update();
+  /*--Check if module is responding with OK response--*/
+  while ( !send_at(2000) )
   {
-    myOLED.print("IP & MAC Error       ", LEFT, 56u);
-    myOLED.update();
     delay(1000);
   }
-  myOLED.print("                     ", LEFT, 48u);
-  myOLED.print("                     ", LEFT, 56u);
-  myOLED.print((char*)IP_ADDRESS, LEFT, 48u);
-  myOLED.print((char*)MAC_ADDRESS, LEFT, 56u);
+  myOLED.print(".........            ", LEFT, 56u);
   myOLED.update();
+
+  delay(500);
+  /*--Set module in Station Mode--*/
+  while( !send_mode(1,2000) )
+  {
+    /*--if control comes here, this means problem in setting mode--*/
+    delay(500);
+  }
+  myOLED.print(".............        ", LEFT, 56u);
+  myOLED.update();
+
+  delay(500);
+  /*--Join with Access Points--*/
+  while( !send_join_ap(ssid, pswd, 5000) )
+  {
+    /*--unable to connect, so retry once again--*/
+    delay(500);
+  }
+  myOLED.print("................     ", LEFT, 56u);
+  myOLED.update();
+  
+  /*--Get IP Address and MAC Address from the Module--*/
+  while( !get_ip_mac_address( IP_ADDRESS, MAC_ADDRESS, 2000) )
+  {
+  
+    /*--unable to get, try again--*/
+    delay(500);
+  }
+  myOLED.print(".....................", LEFT, 56u);
+  snprintf( oled_buff_s, OLED_SMALL_LEN, "IP:%s", (char*)IP_ADDRESS);
+  myOLED.print( oled_buff_s, LEFT, 40u);
+  snprintf( oled_buff_s, OLED_SMALL_LEN, "MAC:%s", (char*)MAC_ADDRESS);
+  myOLED.print( oled_buff_s, LEFT, 48u);
+  myOLED.update();
+  /*--display information for 1 second and then move to looping state--*/
+  delay(1000);
 }
 
 void loop()
 {
-  delay (1000);
+  // TODO:
 }
 
 /*-----------------------------FUNCTION DEFINITIONS---------------------------*/
