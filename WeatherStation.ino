@@ -77,7 +77,7 @@ void setup()
 
   delay(500);
   /*--Join with Access Points--*/
-  while( !send_join_ap(ssid, pswd, 5000) )
+  while( !send_join_ap(ssid, pswd, 6000) )
   {
     /*--unable to connect, so retry once again--*/
     delay(500);
@@ -88,7 +88,6 @@ void setup()
   /*--Get IP Address and MAC Address from the Module--*/
   while( !get_ip_mac_address( IP_ADDRESS, MAC_ADDRESS, 2000) )
   {
-  
     /*--unable to get, try again--*/
     delay(500);
   }
@@ -119,7 +118,7 @@ uint8_t send_echo_off( void )
 {
   Serial.println("ATE0");
   delay(2000);
-  // Flush the Serial Data
+  /*--Flush the Serial Data--*/
   flush_serial_data();
   return true;
 }
@@ -134,7 +133,7 @@ uint8_t send_disconnect_ap( void )
 {
   Serial.println("AT+CWQAP");
   delay(2000);
-  // Flush the Serial Data
+  /*--Flush the Serial Data--*/
   flush_serial_data();
   return true;
 }
@@ -150,9 +149,12 @@ uint8_t send_disconnect_ap( void )
 uint8_t send_at( uint32_t timeout )
 {
   uint8_t status = false;
+  /*--Flush Command Response Buffer--*/
   flush_buffer();
   Serial.println("AT");
   status = check_for_ok( timeout );
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
   return status;
 }
 
@@ -167,11 +169,14 @@ uint8_t send_at( uint32_t timeout )
 uint8_t send_mode( uint8_t mode, uint32_t timeout )
 {
   uint8_t status = false;
+  /*--Flush Command Response Buffer--*/
   flush_buffer();
   Serial.println("AT+CWMODE=1");
   // Serial.print(mode);
   // Serial.println();
   status = check_for_ok( timeout );
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
   return status;
 }
 
@@ -192,11 +197,13 @@ uint8_t send_join_ap( String ssid, String pswd, uint32_t timeout )
   uint8_t status = false;
   // before connecting send the disconnect command
   send_disconnect_ap();
-  // clear the buffer
+  /*--Flush Command Response Buffer--*/
   flush_buffer();
   String packet = "AT+CWJAP=\"" + ssid + "\",\"" + pswd + "\"";
   Serial.println(packet);
   status = check_for_join_ap(timeout);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
   return status;
 }
 
@@ -213,9 +220,12 @@ uint8_t send_join_ap( String ssid, String pswd, uint32_t timeout )
 uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout )
 {
   uint8_t status = false;
+  /*--Flush Command Response Buffer--*/
   flush_buffer();
   Serial.println("AT+CIFSR");
   status = check_get_ip_mac_address(ip, mac, timeout);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
   return status;
 }
 
@@ -238,7 +248,7 @@ uint8_t check_for_ok( uint32_t timeout )
       buff[buff_idx] = Serial.read();
       buff_idx++;
     }
-    // Check for \r\nOK\r\n Response
+    /*--Check for \r\nOK\r\n Response--*/
     if( buff[0] == '\r' && buff[1] == '\n' && buff[2] == 'O' && buff[3] == 'K' && buff[4] == '\r' && buff[5] == '\n' )
     {
       status = true;
@@ -267,7 +277,7 @@ uint8_t check_for_join_ap( uint32_t timeout )
       buff[buff_idx] = Serial.read();
       buff_idx++;
     }
-    // Check for \r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n Response
+    /*--heck for \r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n Response--*/
     if( strncmp( (char*)buff, WIFI_CONNECTED, sizeof(WIFI_CONNECTED)-1 ) == 0 )
     {
       if( strncmp( (char*)(buff+16), WIFI_GOT_IP, sizeof(WIFI_GOT_IP)-1 ) == 0 )
