@@ -7,15 +7,18 @@ const int led = 13u;
 OLED  myOLED(SDA, SCL);
 
 /*---WiFi User Name and Password---*/
-String ssid = "TestWiFi";
-String pswd = "12345678";
+const String ssid = "TestWiFi";         /*--Replace with your Network Name--*/
+const String pswd = "12345678";         /*--Replace with your Network Password--*/
+
+const String GET_REQ_PRE = "GET /data/2.5/weather?q=";
+const String GET_REQ_POST = "&APPID=ENTERYOURAPIKEYHERE&units=metric";   /*--Replace with your API Key--*/
 
 /*---Buffer and Index to process response from ESP8266 Module---*/
 uint8_t buff_idx = 0;
-uint8_t buff[50] = { 0 };
+uint8_t buff[50u] = { 0 };
 /*---Separate Buffer to Process the GET Response which contains weather data--*/
 uint16_t weather_idx = 0u;
-char weather_buff[1024] = { 0 };
+char weather_buff[1000u] = { 0 };
 
 uint8_t IP_ADDRESS[17u] = { 0 };    /*--Store IP Address--*/
 uint8_t MAC_ADDRESS[18u] = { 0 };   /*--Store MAC Address--*/
@@ -36,13 +39,24 @@ const city_info_s s_city_info[NUM_OF_CITIES] =
   { "New York",   86u },
 };
 
-/*--OpenWeather API Key--*/
-const String API_KEY = "fbd756d6387c660e650b533ff585c70e";
-const String GET_REQ_PRE = "GET /data/2.5/weather?q=";
-const String GET_REQ_POST = "&APPID=fbd756d6387c660e650b533ff585c70e&units=metric";
-
 #define OLED_SMALL_LEN    22u
 char oled_buff_s[OLED_SMALL_LEN] = { 0 };     /*--OLED Data to write on a line with Small Font--*/
+
+#define WEATHER_DATA_SIZE       8u
+
+typedef struct _Weather_Data_s
+{
+  uint8_t temp_normal[WEATHER_DATA_SIZE];
+  uint8_t temp_real_feel[WEATHER_DATA_SIZE];
+  uint8_t temp_minimum[WEATHER_DATA_SIZE];
+  uint8_t temp_maximum[WEATHER_DATA_SIZE];
+  int8_t temp_n;
+  int8_t temp_r_f;
+  int8_t temp_min;
+  int8_t temp_max;
+} Weather_Data_s;
+
+Weather_Data_s s_Weather_Data;
 
 /*------------------------------FUNCTION PROTOTYPES---------------------------*/
 uint8_t send_echo_off( void );
@@ -54,14 +68,14 @@ uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout );
 uint8_t send_connect_cmd( uint32_t timeout );
 uint8_t send_close_cmd( void );
 uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout);
-uint8_t send_get_req( String city_name, uint32_t timeout);
+uint8_t send_get_req( String city_name, uint32_t timeout, uint8_t *data);
 
 uint8_t check_for_ok( uint32_t timeout );
 uint8_t check_for_join_ap( uint32_t timeout );
 uint8_t check_get_ip_mac_address( uint8_t ip, uint8_t mac, uint32_t timeout );
 uint8_t check_connect_cmd( uint32_t timeout );
 uint8_t check_for_num_of_bytes( uint32_t timeout );
-uint8_t check_get_req( uint32_t timeout );
+uint8_t check_get_req( uint32_t timeout, uint8_t *data );
 
 void flush_serial_data( void );
 void flush_buffer( void );
@@ -130,6 +144,7 @@ void setup()
   myOLED.update();
   /*--display information for 1 second and then move to looping state--*/
   delay(1000);
+  myOLED.clrScr();
 }
 
 void loop()
@@ -144,7 +159,6 @@ void loop()
       myOLED.print( "Connection: FAIL    ", LEFT, 0u);
       myOLED.update();
     }
-    myOLED.clrScr();
     myOLED.print( "Connection: OK      ", LEFT, 0u);
     myOLED.update();
     delay(500);
@@ -154,10 +168,17 @@ void loop()
     }
     delay(500);
     /*--Send GET Request and Receive Data--*/
-    send_get_req( s_city_info[idx].city_name, 5000);
-    while(1);
+    if( send_get_req( s_city_info[idx].city_name, 5000, &idx) == true )
+    {
+      myOLED.print("City Name: " + s_city_info[idx].city_name, LEFT, 8u);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Temp:%s", (char*)s_Weather_Data.temp_normal);
+      myOLED.print( oled_buff_s, LEFT, 16u);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Real Feel:%s", (char*)s_Weather_Data.temp_real_feel);
+      myOLED.print( oled_buff_s, LEFT, 24u);
+      myOLED.update();
+    }
+    delay(2000);
   }
-  delay(2000);
 }
 
 /*-----------------------------FUNCTION DEFINITIONS---------------------------*/
@@ -349,16 +370,17 @@ uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout)
  * This function sends the GET request to OpenWeather website
  * @param String city name
  * @param timeout Timeout value to exit the function with failure
+ * @param Weather Data Pointer
  * @return Status of the function, true or false TODO:
  */
-uint8_t send_get_req( String city_name, uint32_t timeout)
+uint8_t send_get_req( String city_name, uint32_t timeout, uint8_t *data)
 {
   uint8_t status = false;
   String get_req = GET_REQ_PRE + city_name + GET_REQ_POST;
   /*--Flush Weather Response Buffer--*/
   flush_weather_buffer();
   Serial.println( get_req );
-  status = check_get_req(timeout);
+  status = check_get_req(timeout, data);
   /*--Flush the Serial Data--*/
   flush_serial_data();
   return status;  
@@ -574,10 +596,21 @@ uint8_t check_for_num_of_bytes( uint32_t timeout )
   return status;
 }
 
-uint8_t check_get_req( uint32_t timeout )
+#define SEARCH_COUNTER      20u
+/**
+ * @brief Check the Response of GET Request Command
+ * 
+ * This function checks the response of the GET Request and parse the data and update the buffers
+ * @param timeout Timeout value to exit the function with failure
+ * @param Weather Data Pointer
+ * @return Status of the function, true or false
+ */
+uint8_t check_get_req( uint32_t timeout, uint8_t *data)
 {
   uint32_t timestamp;
+  uint8_t counter = 0u;
   uint8_t status = false;
+  uint8_t idx = 0u;
   char *pointer;
   timestamp = millis();
   while( (millis() - timestamp <= timeout) && (status == false) )
@@ -608,10 +641,76 @@ uint8_t check_get_req( uint32_t timeout )
   /*--parse data if status is true--*/
   if( status )
   {
-    /*--search for "temp"--*/
+    /*--search for "temp", data is like "temp":-1.67--*/
     pointer = strstr( (char*)weather_buff, "temp" );
-    Serial.write(pointer);
-    Serial.write(pointer+1);
+    while( *pointer != '\"' && counter < SEARCH_COUNTER )
+    {
+      pointer++;
+      counter++;
+    }
+    /*--If found copy data into buffer--*/
+    if( counter < SEARCH_COUNTER )
+    {
+      counter = 0u;
+      /*--SW has found quote of "temp":-1.67, and now copy data till we get ,--*/
+      pointer++;  // reached til colon :
+      pointer++;  // now reached -minus
+      idx = 0u;
+      while( *pointer != ',' && counter < SEARCH_COUNTER )
+      {
+        s_Weather_Data.temp_normal[idx] = *pointer;
+        idx++;
+        pointer++;
+        counter++;
+      }
+      s_Weather_Data.temp_normal[idx] = 0;    // Added NULL Character
+    }
+    else
+    {
+      status = false;
+    }
+    
+    /*--Search for Real Feel Temperature--*/
+    if( counter < SEARCH_COUNTER )
+    {
+      counter = 0u;
+      pointer = strstr( (char*)weather_buff, "feels_like" );
+      while( *pointer != '\"' && counter < SEARCH_COUNTER )
+      {
+        pointer++;
+        counter++;
+      }
+      /*--If found copy data into buffer--*/
+      if( counter < SEARCH_COUNTER )
+      {
+        counter = 0u;
+        /*--SW has found quote of feels_like":-1.67, and now copy data till we get ,--*/
+        pointer++;  // reached til colon :
+        pointer++;  // now reached -minus
+        idx = 0u;
+        while( *pointer != ',' && counter < SEARCH_COUNTER )
+        {
+          s_Weather_Data.temp_real_feel[idx] = *pointer;
+          idx++;
+          pointer++;
+          counter++;
+        }
+        s_Weather_Data.temp_real_feel[idx] = 0;    // Added NULL Character
+      }
+    }
+    else
+    {
+      status = false;
+    }
+    
+    /*--Search for Minimum Temperature--*/
+    if( counter < SEARCH_COUNTER )
+    {
+    }
+    else
+    {
+      status = false;
+    }
   }
   return status;
 }
