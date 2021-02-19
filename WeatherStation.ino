@@ -13,6 +13,11 @@ const String pswd = "12345678";         /*--Replace with your Network Password--
 const String GET_REQ_PRE = "GET /data/2.5/weather?q=";
 const String GET_REQ_POST = "&APPID=ENTERYOURAPIKEYHERE&units=metric";   /*--Replace with your API Key--*/
 
+const char WIFI_CONNECTED[] = "WIFI CONNECTED";
+const char WIFI_GOT_IP[] = "WIFI GOT IP";
+const char TCP_CONNECT[] = "CONNECT";
+const char SEND_OK[] = "SEND OK";
+
 /*---Buffer and Index to process response from ESP8266 Module---*/
 uint8_t buff_idx = 0;
 uint8_t buff[50u] = { 0 };
@@ -23,12 +28,29 @@ char weather_buff[1000u] = { 0 };
 uint8_t IP_ADDRESS[17u] = { 0 };    /*--Store IP Address--*/
 uint8_t MAC_ADDRESS[18u] = { 0 };   /*--Store MAC Address--*/
 
-#define NUM_OF_CITIES     4u
+#define NUM_OF_CITIES           4u
+#define WEATHER_DATA_SIZE       8u
+
 typedef struct _city_info_s
 {
   String city_name;
   uint8_t len;
 } city_info_s;
+
+/*--Weather Data Structure--*/
+typedef struct _Weather_Data_s
+{
+  uint8_t temp_normal[WEATHER_DATA_SIZE];
+  uint8_t temp_real_feel[WEATHER_DATA_SIZE];
+  uint8_t temp_minimum[WEATHER_DATA_SIZE];
+  uint8_t temp_maximum[WEATHER_DATA_SIZE];
+  int8_t temp_n;        // TODO: Future
+  int8_t temp_r_f;      // TODO: Future
+  int8_t temp_min;      // TODO: Future
+  int8_t temp_max;      // TODO: Future
+} Weather_Data_s;
+
+Weather_Data_s s_Weather_Data = { 0 };
 
 /*--Total Number of cities--*/
 const city_info_s s_city_info[NUM_OF_CITIES] = 
@@ -36,27 +58,11 @@ const city_info_s s_city_info[NUM_OF_CITIES] =
   { "London",     84u },
   { "Shimla",     84u },
   { "Delhi",      83u },
-  { "New York",   86u },
+  { "New York",   86u }
 };
 
 #define OLED_SMALL_LEN    22u
 char oled_buff_s[OLED_SMALL_LEN] = { 0 };     /*--OLED Data to write on a line with Small Font--*/
-
-#define WEATHER_DATA_SIZE       8u
-
-typedef struct _Weather_Data_s
-{
-  uint8_t temp_normal[WEATHER_DATA_SIZE];
-  uint8_t temp_real_feel[WEATHER_DATA_SIZE];
-  uint8_t temp_minimum[WEATHER_DATA_SIZE];
-  uint8_t temp_maximum[WEATHER_DATA_SIZE];
-  int8_t temp_n;
-  int8_t temp_r_f;
-  int8_t temp_min;
-  int8_t temp_max;
-} Weather_Data_s;
-
-Weather_Data_s s_Weather_Data;
 
 /*------------------------------FUNCTION PROTOTYPES---------------------------*/
 uint8_t send_echo_off( void );
@@ -68,14 +74,14 @@ uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout );
 uint8_t send_connect_cmd( uint32_t timeout );
 uint8_t send_close_cmd( void );
 uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout);
-uint8_t send_get_req( String city_name, uint32_t timeout, uint8_t *data);
+uint8_t send_get_req( String city_name, uint32_t timeout, Weather_Data_s *data);
 
 uint8_t check_for_ok( uint32_t timeout );
 uint8_t check_for_join_ap( uint32_t timeout );
 uint8_t check_get_ip_mac_address( uint8_t ip, uint8_t mac, uint32_t timeout );
 uint8_t check_connect_cmd( uint32_t timeout );
 uint8_t check_for_num_of_bytes( uint32_t timeout );
-uint8_t check_get_req( uint32_t timeout, uint8_t *data );
+uint8_t check_get_req( uint32_t timeout, Weather_Data_s *data );
 
 void flush_serial_data( void );
 void flush_buffer( void );
@@ -142,9 +148,7 @@ void setup()
   snprintf( oled_buff_s, OLED_SMALL_LEN, "MAC:%s", (char*)MAC_ADDRESS);
   myOLED.print( oled_buff_s, LEFT, 48u);
   myOLED.update();
-  /*--display information for 1 second and then move to looping state--*/
-  delay(1000);
-  myOLED.clrScr();
+  delay(100);
 }
 
 void loop()
@@ -152,15 +156,17 @@ void loop()
   uint8_t idx = 0;
   for( idx=0u; idx<NUM_OF_CITIES; idx++)
   {
+    myOLED.setFont(TinyFont);
     /*--Connect the Open Weather Map--*/
     while( !send_connect_cmd( 2000 ) )
     {
       myOLED.clrScr();
-      myOLED.print( "Connection: FAIL    ", LEFT, 0u);
+      myOLED.print( "Connection: FAIL    ", LEFT, 56u);
       myOLED.update();
     }
-    myOLED.print( "Connection: OK      ", LEFT, 0u);
-    myOLED.update();
+    myOLED.clrScr();
+    myOLED.print( "Connection: OK      ", LEFT, 56u);
+    myOLED.setFont(SmallFont);
     delay(500);
     /*--Connection is OK, send Number of Bytes to Send--*/
     while( !send_num_of_bytes( s_city_info[idx].len, 3000) )
@@ -168,13 +174,17 @@ void loop()
     }
     delay(500);
     /*--Send GET Request and Receive Data--*/
-    if( send_get_req( s_city_info[idx].city_name, 5000, &idx) == true )
+    if( send_get_req( s_city_info[idx].city_name, 5000, &s_Weather_Data) == true )
     {
-      myOLED.print("City Name: " + s_city_info[idx].city_name, LEFT, 8u);
-      snprintf( oled_buff_s, OLED_SMALL_LEN, "Temp:%s", (char*)s_Weather_Data.temp_normal);
+      myOLED.print("City Name:" + s_city_info[idx].city_name, CENTER, 0u);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Temp:%s C", (char*)s_Weather_Data.temp_normal);
       myOLED.print( oled_buff_s, LEFT, 16u);
-      snprintf( oled_buff_s, OLED_SMALL_LEN, "Real Feel:%s", (char*)s_Weather_Data.temp_real_feel);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Real Feel:%s C", (char*)s_Weather_Data.temp_real_feel);
       myOLED.print( oled_buff_s, LEFT, 24u);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Min.Temp:%s C", (char*)s_Weather_Data.temp_minimum);
+      myOLED.print( oled_buff_s, LEFT, 32u);
+      snprintf( oled_buff_s, OLED_SMALL_LEN, "Max.Temp:%s C", (char*)s_Weather_Data.temp_maximum);
+      myOLED.print( oled_buff_s, LEFT, 40u);
       myOLED.update();
     }
     delay(2000);
@@ -254,11 +264,6 @@ uint8_t send_mode( uint8_t mode, uint32_t timeout )
   flush_serial_data();
   return status;
 }
-
-const char WIFI_CONNECTED[] = "WIFI CONNECTED";
-const char WIFI_GOT_IP[] = "WIFI GOT IP";
-const char TCP_CONNECT[] = "CONNECT";
-const char SEND_OK[] = "SEND OK";
 
 /**
  * @brief Send Command to Join Access Point
@@ -373,7 +378,7 @@ uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout)
  * @param Weather Data Pointer
  * @return Status of the function, true or false TODO:
  */
-uint8_t send_get_req( String city_name, uint32_t timeout, uint8_t *data)
+uint8_t send_get_req( String city_name, uint32_t timeout, Weather_Data_s *data)
 {
   uint8_t status = false;
   String get_req = GET_REQ_PRE + city_name + GET_REQ_POST;
@@ -605,7 +610,7 @@ uint8_t check_for_num_of_bytes( uint32_t timeout )
  * @param Weather Data Pointer
  * @return Status of the function, true or false
  */
-uint8_t check_get_req( uint32_t timeout, uint8_t *data)
+uint8_t check_get_req( uint32_t timeout, Weather_Data_s *data)
 {
   uint32_t timestamp;
   uint8_t counter = 0u;
@@ -706,11 +711,69 @@ uint8_t check_get_req( uint32_t timeout, uint8_t *data)
     /*--Search for Minimum Temperature--*/
     if( counter < SEARCH_COUNTER )
     {
+      counter = 0u;
+      pointer = strstr( (char*)weather_buff, "temp_min" );
+      while( *pointer != '\"' && counter < SEARCH_COUNTER )
+      {
+        pointer++;
+        counter++;
+      }
+      /*--If found copy data into buffer--*/
+      if( counter < SEARCH_COUNTER )
+      {
+        counter = 0u;
+        /*--SW has found quote of feels_like":-1.67, and now copy data till we get ,--*/
+        pointer++;  // reached til colon :
+        pointer++;  // now reached -minus
+        idx = 0u;
+        while( *pointer != ',' && counter < SEARCH_COUNTER )
+        {
+          s_Weather_Data.temp_minimum[idx] = *pointer;
+          idx++;
+          pointer++;
+          counter++;
+        }
+        s_Weather_Data.temp_minimum[idx] = 0;    // Added NULL Character
+      }
     }
     else
     {
       status = false;
     }
+    
+    /*--Search for Maximum Temperature--*/
+    if( counter < SEARCH_COUNTER )
+    {
+      counter = 0u;
+      pointer = strstr( (char*)weather_buff, "temp_max" );
+      while( *pointer != '\"' && counter < SEARCH_COUNTER )
+      {
+        pointer++;
+        counter++;
+      }
+      /*--If found copy data into buffer--*/
+      if( counter < SEARCH_COUNTER )
+      {
+        counter = 0u;
+        /*--SW has found quote of feels_like":-1.67, and now copy data till we get ,--*/
+        pointer++;  // reached til colon :
+        pointer++;  // now reached -minus
+        idx = 0u;
+        while( *pointer != ',' && counter < SEARCH_COUNTER )
+        {
+          s_Weather_Data.temp_maximum[idx] = *pointer;
+          idx++;
+          pointer++;
+          counter++;
+        }
+        s_Weather_Data.temp_maximum[idx] = 0;    // Added NULL Character
+      }
+    }
+    else
+    {
+      status = false;
+    }
+    
   }
   return status;
 }
