@@ -12,10 +12,34 @@ String pswd = "12345678";
 
 /*---Buffer and Index to process response from ESP8266 Module---*/
 uint8_t buff_idx = 0;
-uint8_t buff[200] = { 0 };
+uint8_t buff[50] = { 0 };
+/*---Separate Buffer to Process the GET Response which contains weather data--*/
+uint16_t weather_idx = 0u;
+char weather_buff[1024] = { 0 };
 
 uint8_t IP_ADDRESS[17u] = { 0 };    /*--Store IP Address--*/
 uint8_t MAC_ADDRESS[18u] = { 0 };   /*--Store MAC Address--*/
+
+#define NUM_OF_CITIES     4u
+typedef struct _city_info_s
+{
+  String city_name;
+  uint8_t len;
+} city_info_s;
+
+/*--Total Number of cities--*/
+const city_info_s s_city_info[NUM_OF_CITIES] = 
+{
+  { "London",     84u },
+  { "Shimla",     84u },
+  { "Delhi",      83u },
+  { "New York",   86u },
+};
+
+/*--OpenWeather API Key--*/
+const String API_KEY = "fbd756d6387c660e650b533ff585c70e";
+const String GET_REQ_PRE = "GET /data/2.5/weather?q=";
+const String GET_REQ_POST = "&APPID=fbd756d6387c660e650b533ff585c70e&units=metric";
 
 #define OLED_SMALL_LEN    22u
 char oled_buff_s[OLED_SMALL_LEN] = { 0 };     /*--OLED Data to write on a line with Small Font--*/
@@ -27,10 +51,17 @@ uint8_t send_at( uint32_t timeout );
 uint8_t send_mode( uint8_t mode, uint32_t timeout );
 uint8_t send_join_ap( String ssid, String pswd, uint32_t timeout );
 uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout );
+uint8_t send_connect_cmd( uint32_t timeout );
+uint8_t send_close_cmd( void );
+uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout);
+uint8_t send_get_req( String city_name, uint32_t timeout);
 
 uint8_t check_for_ok( uint32_t timeout );
 uint8_t check_for_join_ap( uint32_t timeout );
 uint8_t check_get_ip_mac_address( uint8_t ip, uint8_t mac, uint32_t timeout );
+uint8_t check_connect_cmd( uint32_t timeout );
+uint8_t check_for_num_of_bytes( uint32_t timeout );
+uint8_t check_get_req( uint32_t timeout );
 
 void flush_serial_data( void );
 void flush_buffer( void );
@@ -103,7 +134,30 @@ void setup()
 
 void loop()
 {
-  // TODO:
+  uint8_t idx = 0;
+  for( idx=0u; idx<NUM_OF_CITIES; idx++)
+  {
+    /*--Connect the Open Weather Map--*/
+    while( !send_connect_cmd( 2000 ) )
+    {
+      myOLED.clrScr();
+      myOLED.print( "Connection: FAIL    ", LEFT, 0u);
+      myOLED.update();
+    }
+    myOLED.clrScr();
+    myOLED.print( "Connection: OK      ", LEFT, 0u);
+    myOLED.update();
+    delay(500);
+    /*--Connection is OK, send Number of Bytes to Send--*/
+    while( !send_num_of_bytes( s_city_info[idx].len, 3000) )
+    {
+    }
+    delay(500);
+    /*--Send GET Request and Receive Data--*/
+    send_get_req( s_city_info[idx].city_name, 5000);
+    while(1);
+  }
+  delay(2000);
 }
 
 /*-----------------------------FUNCTION DEFINITIONS---------------------------*/
@@ -117,7 +171,7 @@ void loop()
 uint8_t send_echo_off( void )
 {
   Serial.println("ATE0");
-  delay(2000);
+  delay(500);
   /*--Flush the Serial Data--*/
   flush_serial_data();
   return true;
@@ -132,7 +186,7 @@ uint8_t send_echo_off( void )
 uint8_t send_disconnect_ap( void )
 {
   Serial.println("AT+CWQAP");
-  delay(2000);
+  delay(1000);
   /*--Flush the Serial Data--*/
   flush_serial_data();
   return true;
@@ -182,6 +236,8 @@ uint8_t send_mode( uint8_t mode, uint32_t timeout )
 
 const char WIFI_CONNECTED[] = "WIFI CONNECTED";
 const char WIFI_GOT_IP[] = "WIFI GOT IP";
+const char TCP_CONNECT[] = "CONNECT";
+const char SEND_OK[] = "SEND OK";
 
 /**
  * @brief Send Command to Join Access Point
@@ -195,7 +251,7 @@ const char WIFI_GOT_IP[] = "WIFI GOT IP";
 uint8_t send_join_ap( String ssid, String pswd, uint32_t timeout )
 {
   uint8_t status = false;
-  // before connecting send the disconnect command
+  /*--before connecting send the disconnect command--*/
   send_disconnect_ap();
   /*--Flush Command Response Buffer--*/
   flush_buffer();
@@ -227,6 +283,85 @@ uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout )
   /*--Flush the Serial Data--*/
   flush_serial_data();
   return status;
+}
+
+/**
+ * @brief Connect with TCP Server
+ * 
+ * This function sends the command to connect with TCP Server
+ * @param timeout Timeout value to exit the function with failure
+ * @return Status of the function, true or false
+ */
+uint8_t send_connect_cmd( uint32_t timeout )
+{
+  uint8_t status = false;
+  /*--Before connecting send close the connection--*/
+  send_close_cmd();
+  /*--Flush Command Response Buffer--*/
+  flush_buffer();
+  Serial.println("AT+CIPSTART=\"TCP\",\"api.openweathermap.org\",80");
+  status = check_connect_cmd( timeout);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
+  return status;  
+}
+
+/**
+ * @brief Disconnect with the Server
+ * 
+ * This function sends the command to disconnect from the server
+ * @return Status of the function, true or false TODO:
+ */
+uint8_t send_close_cmd( void )
+{
+  /*--For Single Connections--*/
+  Serial.println("AT+CIPCLOSE");
+  delay(1000);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
+  return true;
+}
+
+/**
+ * @brief Send Number of Bytes
+ * 
+ * This function sends the CIPSEND command with no. of bytes
+ * @param no_bytes length of GET Request
+ * @param timeout Timeout value to exit the function with failure
+ * @return Status of the function, true or false TODO:
+ */
+uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout)
+{
+  uint8_t status = false;
+  /*--Flush Command Response Buffer--*/
+  flush_buffer();
+  Serial.print("AT+CIPSEND=");
+  Serial.println(no_bytes);
+  status = check_for_num_of_bytes( timeout);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
+  return status;  
+}
+
+/**
+ * @brief Send GET Request
+ * 
+ * This function sends the GET request to OpenWeather website
+ * @param String city name
+ * @param timeout Timeout value to exit the function with failure
+ * @return Status of the function, true or false TODO:
+ */
+uint8_t send_get_req( String city_name, uint32_t timeout)
+{
+  uint8_t status = false;
+  String get_req = GET_REQ_PRE + city_name + GET_REQ_POST;
+  /*--Flush Weather Response Buffer--*/
+  flush_weather_buffer();
+  Serial.println( get_req );
+  status = check_get_req(timeout);
+  /*--Flush the Serial Data--*/
+  flush_serial_data();
+  return status;  
 }
 
 /**
@@ -379,6 +514,109 @@ uint8_t check_get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout )
 }
 
 /**
+ * @brief Check the Response of CIPSTART Command
+ * 
+ * This function checks the response of CIPSTART command.
+ * @param timeout Timeout value to exit the function with failure
+ * @return Status of the function, true or false
+ */
+uint8_t check_connect_cmd( uint32_t timeout )
+{
+  uint32_t timestamp;
+  uint8_t status = false;
+  timestamp = millis();
+  while( (millis() - timestamp <= timeout) && (status == false) )
+  {
+    if( Serial.available() > 0 )
+    {
+      buff[buff_idx] = Serial.read();
+      buff_idx++;
+    }
+    /*--valid response from module is CONNECT{0D}{0A}{0D}{0A}OK{0D}{0A} --*/
+    if( strncmp( (char*)buff, TCP_CONNECT, sizeof(TCP_CONNECT)-1 ) == 0 )
+    {
+      if( buff[7] == '\r' && buff[8] == '\n' && buff[9] == '\r' && buff[10] == '\n' && \
+          buff[11] == 'O' && buff[12] == 'K' && buff[13] == '\r' && buff[14] == '\n' )
+      {
+        status = true;
+      }
+    }
+  }
+  return status;
+}
+
+/**
+ * @brief Check the Response of CIPSEND Command
+ * 
+ * This function checks the response of CIPSEND command.
+ * @param timeout Timeout value to exit the function with failure
+ * @return Status of the function, true or false
+ */
+uint8_t check_for_num_of_bytes( uint32_t timeout )
+{
+  uint32_t timestamp;
+  uint8_t status = false;
+  timestamp = millis();
+  while( (millis() - timestamp <= timeout) && (status == false) )
+  {
+    if( Serial.available() > 0 )
+    {
+      buff[buff_idx] = Serial.read();
+      buff_idx++;
+    }
+    /*--Check for \r\nOK\r\n>Response--*/
+    if( buff[0] == '\r' && buff[1] == '\n' && buff[2] == 'O' && buff[3] == 'K' && buff[4] == '\r' && buff[5] == '\n' && \
+        buff[6] == '>' )
+    {
+      status = true;
+    }
+  }
+  return status;
+}
+
+uint8_t check_get_req( uint32_t timeout )
+{
+  uint32_t timestamp;
+  uint8_t status = false;
+  char *pointer;
+  timestamp = millis();
+  while( (millis() - timestamp <= timeout) && (status == false) )
+  {
+    if( Serial.available() > 0 )
+    {
+      weather_buff[weather_idx] = Serial.read();
+      weather_idx++;
+    }
+    /*--we will get a lot of data from the module, and we have to first wait till data is completely received--*/
+    /*--we receive this packet at last CLOSED\r\n, so we will wait till we get this data--*/
+    /*Example of Data Received
+    Recv 86 bytes{0D}{0A}{0D}{0A}SEND OK{0D}{0A}{0D}{0A}+IPD,554:{"coord":{"lon":-74.006,"lat":40.7143},"
+    weather":[{"id":600,"main":"Snow","description":"light snow","icon":"13n"},
+    {"id":701,"main":"Mist","description":"mist","icon":"50n"}],"base":"stations",
+    "main":{"temp":-1.67,"feels_like":-9.42,"temp_min":-3,"temp_max":-0.56,"pressure":1021,"humidity":93},"visibility":9656,
+    "wind":{"speed":7.72,"deg":30,"gust":10.29},"snow":{"1h":0.27},"clouds":{"all":90},"dt":1613730994,
+    "sys":{"type":1,"id":4610,"country":"US","sunrise":1613735067,"sunset":1613774132},"timezone":-18000,"id":5128581,"name":"New York","cod":200}
+    CLOSED{0D}{0A}--*/
+    /*--TODO: poor way of doing, need to improve this--*/
+    if( weather_idx > 10u && weather_buff[weather_idx-1] == '\n' && weather_buff[weather_idx-2] == '\r' && weather_buff[weather_idx-3] == 'D' && \
+        weather_buff[weather_idx-4] == 'E' && weather_buff[weather_idx-5] == 'S' && weather_buff[weather_idx-6] == 'O' && weather_buff[weather_idx-7] == 'L' && weather_buff[weather_idx-8] == 'C' )
+    {
+      /*--this means that data has been received correctly and now we can proceed with parsing of the data--*/
+      status = true;
+    }
+  }
+  /*--parse data if status is true--*/
+  if( status )
+  {
+    /*--search for "temp"--*/
+    pointer = strstr( (char*)weather_buff, "temp" );
+    Serial.write(pointer);
+    Serial.write(pointer+1);
+  }
+  return status;
+}
+
+/**
  * @brief Clear the Buffer
  * 
  * This function resets the buffer index and buffer content
@@ -387,6 +625,17 @@ void flush_buffer( void )
 {
   buff_idx = 0x00;
   memset( buff, 0x00, sizeof(buff) );
+}
+
+/**
+ * @brief Clear the Weather Buffer
+ * 
+ * This function resets the buffer index and buffer content
+ */
+void flush_weather_buffer( void )
+{
+  weather_idx = 0x00;
+  memset( weather_buff, 0x00, sizeof(weather_buff) );
 }
 
 /**
