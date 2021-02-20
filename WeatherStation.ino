@@ -74,14 +74,14 @@ uint8_t get_ip_mac_address( uint8_t *ip, uint8_t *mac, uint32_t timeout );
 uint8_t send_connect_cmd( uint32_t timeout );
 uint8_t send_close_cmd( void );
 uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout);
-uint8_t send_get_req( String city_name, uint32_t timeout, Weather_Data_s *data);
+uint8_t send_get_req( String city_name, uint32_t timeout );
 
 uint8_t check_for_ok( uint32_t timeout );
 uint8_t check_for_join_ap( uint32_t timeout );
 uint8_t check_get_ip_mac_address( uint8_t ip, uint8_t mac, uint32_t timeout );
 uint8_t check_connect_cmd( uint32_t timeout );
 uint8_t check_for_num_of_bytes( uint32_t timeout );
-uint8_t check_get_req( uint32_t timeout, Weather_Data_s *data );
+uint8_t check_get_req( uint32_t timeout );
 
 void flush_serial_data( void );
 void flush_buffer( void );
@@ -174,7 +174,7 @@ void loop()
     }
     delay(500);
     /*--Send GET Request and Receive Data--*/
-    if( send_get_req( s_city_info[idx].city_name, 5000, &s_Weather_Data) == true )
+    if( send_get_req( s_city_info[idx].city_name, 5000u ) == true )
     {
       myOLED.print("City Name:" + s_city_info[idx].city_name, CENTER, 0u);
       snprintf( oled_buff_s, OLED_SMALL_LEN, "Temp:%s C", (char*)s_Weather_Data.temp_normal);
@@ -378,14 +378,14 @@ uint8_t send_num_of_bytes( uint8_t no_bytes, uint32_t timeout)
  * @param Weather Data Pointer
  * @return Status of the function, true or false TODO:
  */
-uint8_t send_get_req( String city_name, uint32_t timeout, Weather_Data_s *data)
+uint8_t send_get_req( String city_name, uint32_t timeout )
 {
   uint8_t status = false;
   String get_req = GET_REQ_PRE + city_name + GET_REQ_POST;
   /*--Flush Weather Response Buffer--*/
   flush_weather_buffer();
   Serial.println( get_req );
-  status = check_get_req(timeout, data);
+  status = check_get_req(timeout);
   /*--Flush the Serial Data--*/
   flush_serial_data();
   return status;  
@@ -610,7 +610,7 @@ uint8_t check_for_num_of_bytes( uint32_t timeout )
  * @param Weather Data Pointer
  * @return Status of the function, true or false
  */
-uint8_t check_get_req( uint32_t timeout, Weather_Data_s *data)
+uint8_t check_get_req( uint32_t timeout )
 {
   uint32_t timestamp;
   uint8_t counter = 0u;
