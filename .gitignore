@@ -1,0 +1,3 @@
+# Ignoring Proteus Related Files
+*.pdsbak
+*.workspace
