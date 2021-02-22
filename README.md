@@ -36,3 +36,5 @@ I will try to prepare a diagram to help in understanding in a better way, but fo
 Other Important Links:
 * [Want to update the ESP8266 AT Firmware](https://www.youtube.com/watch?v=wXXXgaePZX8)
 * [Introduction to some important AT Commands of ESP8266](https://www.youtube.com/watch?v=hP4YxjG9t3g)
+* [Weather Station Based on Arduino & ESP8266 Using "OpenWeatherMap" API & AT Commands - OLED Based](https://www.youtube.com/watch?v=gWQxuI-oCUU)
+* [Weather Station Based on Arduino & ESP8266 Using "OpenWeatherMap" API & AT Commands - TFT Based](https://www.youtube.com/watch?v=2BqeEwCSjyM)
